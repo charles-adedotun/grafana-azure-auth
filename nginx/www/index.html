@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure B2C Authentication</title>
+    <script src="https://alcdn.msauth.net/browser/2.31.0/js/msal-browser.min.js"></script>
+    <script>
+        const msalConfig = {
+            auth: {
+                clientId: "d485e13b-d85e-4f76-84b5-e8f1b3a14562",
+                authority: "https://testgrafana25109.b2clogin.com/testgrafana25109.onmicrosoft.com/B2C_1_SIGNIN_SIGNUP",
+                knownAuthorities: ["testgrafana25109.b2clogin.com"],
+                redirectUri: "http://localhost" // Update this to your app's URL if different
+            }
+        };
+
+        const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+        msalInstance.handleRedirectPromise()
+            .then(response => {
+                if (response) {
+                    console.log('Login successful:', response);
+                } else {
+                    console.log('No login response, user might need to sign in.');
+                }
+            })
+            .catch(error => {
+                console.error('Login error:', error);
+            });
+
+        function signIn() {
+            msalInstance.loginRedirect();
+        }
+    </script>
+</head>
+<body>
+    <h1>Azure B2C Authentication with MSAL.js</h1>
+    <button onclick="signIn()">Sign In</button>
+</body>
+</html>

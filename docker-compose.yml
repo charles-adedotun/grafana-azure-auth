@@ -10,8 +10,6 @@ services:
       - AZURE_TENANT=testgrafana25109
       - AZURE_CLIENT_ID=d485e13b-d85e-4f76-84b5-e8f1b3a14562
       - AZURE_POLICY_NAME=B2C_1_SIGNIN_SIGNUP
-    volumes:
-      - ./nginx/logs:/var/log/nginx
 
   grafana:
     image: grafana/grafana:latest
