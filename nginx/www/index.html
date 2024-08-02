@@ -25,16 +25,50 @@
                 return false;
             } else {
                 console.log('User is already signed in:', currentAccounts[0]);
-                return true;
+                return currentAccounts[0];
             }
+        }
+
+        function redirectToGrafana(account) {
+            // Prepare to send a request to Grafana
+            const headers = new Headers({
+                'X-WEBAUTH-USER': account.username,
+                // Add other headers as needed, for example:
+                'X-WEBAUTH-NAME': account.name,
+                'X-WEBAUTH-EMAIL': account.username // Assuming username is an email
+            });
+
+            // Perform a fetch request to Grafana
+            fetch('/grafana/', {
+                method: 'GET',
+                headers: headers,
+                credentials: 'include',  // This is important for including cookies
+            })
+            .then(response => {
+                if (response.ok) {
+                    // If the response is successful, redirect to Grafana
+                    window.location.href = '/grafana/';
+                } else {
+                    console.error('Failed to authenticate with Grafana');
+                }
+            })
+            .catch(error => {
+                console.error('Error during Grafana authentication:', error);
+            });
         }
 
         msalInstance.handleRedirectPromise()
             .then(response => {
                 if (response) {
-                    console.log('Login successful:', response);
+                    const account = response.account;
+                    if (account) {
+                        redirectToGrafana(account);
+                    }
                 } else {
-                    if (!checkAccount() && !redirectInitiated) {
+                    const account = checkAccount();
+                    if (account && !redirectInitiated) {
+                        redirectToGrafana(account);
+                    } else if (!redirectInitiated) {
                         redirectInitiated = true;
                         msalInstance.loginRedirect();
                     }
@@ -43,10 +77,6 @@
             .catch(error => {
                 console.error('Login error:', error);
             });
-
-        // Check account status once the page has loaded and the redirect promise is handled
-        window.onload = function() {
-        };
     </script>
 </head>
 <body>
