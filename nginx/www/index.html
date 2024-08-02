@@ -16,26 +16,40 @@
         };
 
         const msalInstance = new msal.PublicClientApplication(msalConfig);
+        let redirectInitiated = false;
+
+        function checkAccount() {
+            const currentAccounts = msalInstance.getAllAccounts();
+            if (currentAccounts === null || currentAccounts.length === 0) {
+                console.log('No user is logged in');
+                return false;
+            } else {
+                console.log('User is already signed in:', currentAccounts[0]);
+                return true;
+            }
+        }
 
         msalInstance.handleRedirectPromise()
             .then(response => {
                 if (response) {
                     console.log('Login successful:', response);
                 } else {
-                    console.log('No login response, user might need to sign in.');
+                    if (!checkAccount() && !redirectInitiated) {
+                        redirectInitiated = true;
+                        msalInstance.loginRedirect();
+                    }
                 }
             })
             .catch(error => {
                 console.error('Login error:', error);
             });
 
-        function signIn() {
-            msalInstance.loginRedirect();
-        }
+        // Check account status once the page has loaded and the redirect promise is handled
+        window.onload = function() {
+        };
     </script>
 </head>
 <body>
     <h1>Azure B2C Authentication with MSAL.js</h1>
-    <button onclick="signIn()">Sign In</button>
 </body>
 </html>
