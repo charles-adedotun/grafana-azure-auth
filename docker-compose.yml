@@ -1,0 +1,33 @@
+version: '3'
+services:
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - grafana
+    environment:
+      - AZURE_TENANT=testgrafana25109
+      - AZURE_CLIENT_ID=d485e13b-d85e-4f76-84b5-e8f1b3a14562
+      - AZURE_POLICY_NAME=B2C_1_SIGNIN_SIGNUP
+    volumes:
+      - ./nginx/logs:/var/log/nginx
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
+      - GF_AUTH_PROXY_HEADER_PROPERTY=username
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      - GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=true
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_PROXY_SYNC_TTL=60
+    volumes:
+      - grafana-storage:/var/lib/grafana
+
+volumes:
+  grafana-storage:
