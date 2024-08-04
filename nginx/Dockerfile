@@ -1,14 +1,14 @@
-# Use the official Nginx image from the Docker Hub
-FROM nginx:alpine
+FROM nginx:latest
 
-# Copy your custom Nginx configuration (if needed)
+# Copy Nginx configuration and entrypoint script
 COPY nginx.conf /etc/nginx/nginx.conf
+COPY entrypoint.sh /entrypoint.sh
 
-# Copy your static website files to the Nginx web root
-COPY ./www /usr/share/nginx/html
+# Make entrypoint script executable
+RUN chmod +x /entrypoint.sh
 
-# Expose port 80 to the outside world
+# Set entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Expose HTTP port
 EXPOSE 80
-
-# Start Nginx
-CMD ["nginx", "-g", "daemon off;"]
