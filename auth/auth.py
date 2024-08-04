@@ -10,9 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-
-# Use a fixed secret key for Flask session handling (for production, use a secure and persistent secret key)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'supersecretkey')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -67,7 +65,7 @@ def auth_response():
             logger.error("Login failed: No token claims received")
             return "Login failed: No token claims received"
         
-        # Store the necessary user information in session after successful login
+        # Store user information in session after successful login
         session["user"] = {
             "username": result["id_token_claims"].get("name", ""),
             "email": result["id_token_claims"].get("emails", [""])[0] if "emails" in result["id_token_claims"] else ""
@@ -89,14 +87,19 @@ def auth_grafana():
         # Forward the request to Grafana, maintaining the original path
         grafana_response = requests.get(
             GRAFANA_URL + request.full_path.replace('/auth-grafana', ''),
-            headers={'X-WEBAUTH-USER': session["user"].get("username", "")},
+            headers={
+                'X-WEBAUTH-USER': session["user"].get("username", ""),
+                'X-WEBAUTH-NAME': session["user"].get("username", ""),
+                'X-WEBAUTH-EMAIL': session["user"].get("email", "")
+            },
             allow_redirects=False
         )
 
-        # Create a new response object and pass along the headers from Grafana
+        # Create a new response object, but explicitly remove Transfer-Encoding if it's set
         response = Response(grafana_response.content, status=grafana_response.status_code)
         for key, value in grafana_response.headers.items():
-            response.headers[key] = value
+            if key.lower() != 'transfer-encoding':
+                response.headers[key] = value
 
         logger.info(f"Proxying request to Grafana with status: {grafana_response.status_code}")
 
@@ -105,7 +108,6 @@ def auth_grafana():
         logger.error(f"Error in auth_grafana route: {str(e)}")
         return InternalServerError("An unexpected error occurred during Grafana authentication")
 
-# Add a route to proxy static assets and other requests to Grafana
 @app.route('/public/<path:path>', methods=['GET'])
 def proxy_static(path):
     try:

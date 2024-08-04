@@ -10,8 +10,8 @@ services:
       - GF_AUTH_PROXY_HEADERS=Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
       - GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false
-      - GF_SERVER_ROOT_URL=http://localhost:3000
-      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      - GF_SERVER_ROOT_URL=http://localhost/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_AUTH_PROXY_SYNC_TTL=60
       - GF_USERS_AUTO_ASSIGN_ORG=true
       - GF_USERS_AUTO_ASSIGN_ORG_ROLE=Admin
@@ -37,6 +37,16 @@ services:
       - AZURE_POLICY_NAME=${AZURE_POLICY_NAME}
       - GRAFANA_URL=http://grafana:3000
       - SSL_VERIFY=False
+    networks:
+      - grafana
+
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - auth
+      - grafana
     networks:
       - grafana
 
