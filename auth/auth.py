@@ -3,6 +3,7 @@ import logging
 from flask import Flask, request, redirect, session, url_for, Response
 from msal import ConfidentialClientApplication
 import requests
+from urllib.parse import urlparse, urlunparse
 from werkzeug.exceptions import InternalServerError
 from dotenv import load_dotenv
 
@@ -25,7 +26,7 @@ AUTHORITY = f'https://{B2C_TENANT}.b2clogin.com/{B2C_TENANT}.onmicrosoft.com/{US
 REDIRECT_PATH = "/getAToken"
 
 # Grafana Configuration
-GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://localhost:3000')
+GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://grafana:3000')
 
 # MSAL Configuration
 msal_app = ConfidentialClientApplication(
@@ -84,16 +85,41 @@ def auth_grafana():
         return redirect(url_for("login"))
     
     try:
-        # Forward the request to Grafana, maintaining the original path
+        # Prepare headers
+        headers = {
+            'X-WEBAUTH-USER': session["user"].get("username", ""),
+            'X-WEBAUTH-NAME': session["user"].get("username", ""),
+            'X-WEBAUTH-EMAIL': session["user"].get("email", "")
+        }
+        
+        logger.info(f"Headers being sent to Grafana: {headers}")
+
+        # Forward the request to Grafana
         grafana_response = requests.get(
             GRAFANA_URL + request.full_path.replace('/auth-grafana', ''),
-            headers={
-                'X-WEBAUTH-USER': session["user"].get("username", ""),
-                'X-WEBAUTH-NAME': session["user"].get("username", ""),
-                'X-WEBAUTH-EMAIL': session["user"].get("email", "")
-            },
-            allow_redirects=False
+            headers=headers,
+            allow_redirects=False  # Disable automatic redirects
         )
+
+        # If a redirect is required, manually handle it and reapply headers
+        if grafana_response.is_redirect:
+            redirect_url = grafana_response.headers.get('Location')
+            logger.info(f"Handling redirect to {redirect_url} and reapplying headers")
+
+            # Parse the redirect URL and replace 'localhost' with the correct Grafana service name and port
+            parsed_url = urlparse(redirect_url)
+            if parsed_url.hostname == 'localhost':
+                parsed_url = parsed_url._replace(netloc='grafana:3000')
+                redirect_url = urlunparse(parsed_url)
+
+            grafana_response = requests.get(
+                redirect_url,
+                headers=headers,
+                allow_redirects=False
+            )
+
+        # Log the response headers for debugging
+        logger.info(f"Response headers from Grafana: {grafana_response.headers}")
 
         # Create a new response object, but explicitly remove Transfer-Encoding if it's set
         response = Response(grafana_response.content, status=grafana_response.status_code)
@@ -116,6 +142,9 @@ def proxy_static(path):
             f"{GRAFANA_URL}/public/{path}",
             allow_redirects=False
         )
+
+        # Log the response headers for debugging
+        logger.info(f"Response headers from Grafana: {grafana_response.headers}")
 
         # Return the response from Grafana
         response = Response(grafana_response.content, status=grafana_response.status_code)
