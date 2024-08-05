@@ -75,7 +75,6 @@ def auth_response():
             logger.error("Login failed: No token claims received")
             return "Login failed: No token claims received"
         
-        # Store user information in session after successful login
         session["user"] = {
             "username": result["id_token_claims"].get("name", ""),
             "email": result["id_token_claims"].get("emails", [""])[0] if "emails" in result["id_token_claims"] else ""
@@ -95,22 +94,18 @@ def auth_grafana():
     
     try:
         headers = get_auth_headers()
-        
         logger.info(f"Headers being sent to Grafana: {headers}")
 
-        # Forward the request to Grafana
         grafana_response = requests.get(
             GRAFANA_URL + request.full_path.replace('/auth-grafana', ''),
             headers=headers,
-            allow_redirects=False  # Disable automatic redirects
+            allow_redirects=False
         )
 
-        # If a redirect is required, manually handle it and reapply headers
         if grafana_response.is_redirect:
             redirect_url = grafana_response.headers.get('Location')
             logger.info(f"Handling redirect to {redirect_url} and reapplying headers")
 
-            # Parse the redirect URL and replace 'localhost' with the correct Grafana service name and port
             parsed_url = urlparse(redirect_url)
             if parsed_url.hostname == 'localhost':
                 parsed_url = parsed_url._replace(netloc='grafana:3000')
@@ -122,10 +117,8 @@ def auth_grafana():
                 allow_redirects=False
             )
 
-        # Log the response headers for debugging
         logger.info(f"Response headers from Grafana: {grafana_response.headers}")
 
-        # Create a new response object, but explicitly remove Transfer-Encoding if it's set
         response = Response(grafana_response.content, status=grafana_response.status_code)
         for key, value in grafana_response.headers.items():
             if key.lower() != 'transfer-encoding':
@@ -141,16 +134,13 @@ def auth_grafana():
 @app.route('/public/<path:path>', methods=['GET'])
 def proxy_static(path):
     try:
-        # Forward the static file requests to Grafana
         grafana_response = requests.get(
             f"{GRAFANA_URL}/public/{path}",
             allow_redirects=False
         )
 
-        # Log the response headers for debugging
         logger.info(f"Response headers from Grafana: {grafana_response.headers}")
 
-        # Return the response from Grafana
         response = Response(grafana_response.content, status=grafana_response.status_code)
         for key, value in grafana_response.headers.items():
             response.headers[key] = value
@@ -201,43 +191,35 @@ def proxy_grafana_api(path):
 def proxy_grafana_live(ws):
     if "user" not in session:
         logger.info("User session not found for WebSocket connection")
-        ws.close()
         return
 
     try:
         headers = get_auth_headers()
         ws_url = f"{GRAFANA_URL.replace('http', 'ws')}/api/live/ws"
 
-        def on_message(ws, message):
-            logger.debug(f"Received message from Grafana: {message}")
-            ws.send(message)
+        grafana_ws = websocket.create_connection(ws_url, header=headers)
 
-        def on_error(ws, error):
-            logger.error(f"WebSocket error: {error}")
+        def socket_proxy(source, destination):
+            try:
+                while True:
+                    message = source.receive()
+                    if message is None:
+                        break
+                    destination.send(message)
+            except Exception as e:
+                logger.error(f"Error in socket proxy: {str(e)}")
+            finally:
+                source.close()
+                destination.close()
 
-        def on_close(ws):
-            logger.info("WebSocket connection closed")
+        t1 = threading.Thread(target=socket_proxy, args=(ws, grafana_ws))
+        t2 = threading.Thread(target=socket_proxy, args=(grafana_ws, ws))
 
-        def on_open(ws):
-            logger.info("WebSocket connection opened")
+        t1.start()
+        t2.start()
 
-        websocket.enableTrace(True)
-        grafana_ws = websocket.WebSocketApp(ws_url,
-                                            header=headers,
-                                            on_message=on_message,
-                                            on_error=on_error,
-                                            on_close=on_close,
-                                            on_open=on_open)
-
-        wst = threading.Thread(target=grafana_ws.run_forever)
-        wst.daemon = True
-        wst.start()
-
-        while not ws.closed:
-            message = ws.receive()
-            if message:
-                logger.debug(f"Sending message to Grafana: {message}")
-                grafana_ws.send(message)
+        t1.join()
+        t2.join()
 
     except Exception as e:
         logger.error(f"Error in proxy_grafana_live WebSocket: {str(e)}")
