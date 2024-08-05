@@ -30,6 +30,9 @@ REDIRECT_PATH = "/getAToken"
 # Grafana Configuration
 GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://grafana:3000')
 
+# New configuration for the external URL
+EXTERNAL_URL = os.environ.get('EXTERNAL_URL', 'http://localhost:3200')
+
 # MSAL Configuration
 msal_app = ConfidentialClientApplication(
     client_id=CLIENT_ID,
@@ -48,15 +51,15 @@ def get_auth_headers():
 def index():
     if "user" not in session:
         logger.info("User not authenticated, redirecting to login")
-        return redirect(url_for("login"))
+        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
     logger.info("User authenticated, redirecting to Grafana")
-    return redirect(url_for("auth_grafana"))
+    return redirect(url_for("auth_grafana", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
 
 @app.route("/login")
 def login():
     session["flow"] = msal_app.initiate_auth_code_flow(
         scopes=[],
-        redirect_uri=url_for("auth_response", _external=True)
+        redirect_uri=url_for("auth_response", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme)
     )
     logger.info("Initiating auth code flow, redirecting to Azure B2C")
     return redirect(session["flow"]["auth_uri"])
@@ -81,7 +84,7 @@ def auth_response():
         }
 
         logger.info(f"User logged in successfully with username: {session['user']['username']}")
-        return redirect(url_for("auth_grafana"))
+        return redirect(url_for("auth_grafana", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
     except ValueError as ve:
         logger.error(f"Login failed: {str(ve)}")
         return f"Login failed: {str(ve)}"
