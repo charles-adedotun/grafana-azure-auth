@@ -6,11 +6,13 @@ import requests
 from urllib.parse import urlparse, urlunparse
 from werkzeug.exceptions import InternalServerError
 from dotenv import load_dotenv
+from flask_sockets import Sockets
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
+sockets = Sockets(app)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'supersecretkey')
 
 # Set up logging
@@ -34,6 +36,13 @@ msal_app = ConfidentialClientApplication(
     authority=AUTHORITY,
     client_credential=CLIENT_SECRET,
 )
+
+def get_auth_headers():
+    return {
+        'X-WEBAUTH-USER': session["user"].get("username", ""),
+        'X-WEBAUTH-NAME': session["user"].get("username", ""),
+        'X-WEBAUTH-EMAIL': session["user"].get("email", "")
+    }
 
 @app.route("/")
 def index():
@@ -85,12 +94,7 @@ def auth_grafana():
         return redirect(url_for("login"))
     
     try:
-        # Prepare headers
-        headers = {
-            'X-WEBAUTH-USER': session["user"].get("username", ""),
-            'X-WEBAUTH-NAME': session["user"].get("username", ""),
-            'X-WEBAUTH-EMAIL': session["user"].get("email", "")
-        }
+        headers = get_auth_headers()
         
         logger.info(f"Headers being sent to Grafana: {headers}")
 
@@ -158,6 +162,122 @@ def proxy_static(path):
         logger.error(f"Error proxying static file request: {str(e)}")
         return InternalServerError("An unexpected error occurred while proxying static file request")
 
+@app.route('/grafana/api/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def proxy_grafana_api(path):
+    if "user" not in session:
+        logger.info("User session not found, redirecting to login")
+        return redirect(url_for("login"))
+
+    try:
+        headers = get_auth_headers()
+        url = f"{GRAFANA_URL}/api/{path}"
+        
+        method = request.method
+        data = request.get_data()
+        params = request.args
+
+        grafana_response = requests.request(
+            method,
+            url,
+            headers=headers,
+            data=data,
+            params=params,
+            allow_redirects=False
+        )
+
+        response = Response(grafana_response.content, status=grafana_response.status_code)
+        for key, value in grafana_response.headers.items():
+            if key.lower() != 'transfer-encoding':
+                response.headers[key] = value
+
+        logger.info(f"Proxying request to Grafana API: {url} with status: {grafana_response.status_code}")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in proxy_grafana_api route: {str(e)}")
+        return InternalServerError("An unexpected error occurred during Grafana API request")
+
+@sockets.route('/grafana/api/live/ws')
+def proxy_grafana_live(ws):
+    if "user" not in session:
+        logger.info("User session not found for WebSocket connection")
+        ws.close()
+        return
+
+    try:
+        headers = get_auth_headers()
+        ws_url = f"{GRAFANA_URL.replace('http', 'ws')}/api/live/ws"
+
+        def on_message(ws, message):
+            logger.debug(f"Received message from Grafana: {message}")
+            ws.send(message)
+
+        def on_error(ws, error):
+            logger.error(f"WebSocket error: {error}")
+
+        def on_close(ws):
+            logger.info("WebSocket connection closed")
+
+        def on_open(ws):
+            logger.info("WebSocket connection opened")
+
+        websocket.enableTrace(True)
+        grafana_ws = websocket.WebSocketApp(ws_url,
+                                            header=headers,
+                                            on_message=on_message,
+                                            on_error=on_error,
+                                            on_close=on_close,
+                                            on_open=on_open)
+
+        wst = threading.Thread(target=grafana_ws.run_forever)
+        wst.daemon = True
+        wst.start()
+
+        while not ws.closed:
+            message = ws.receive()
+            if message:
+                logger.debug(f"Sending message to Grafana: {message}")
+                grafana_ws.send(message)
+
+    except Exception as e:
+        logger.error(f"Error in proxy_grafana_live WebSocket: {str(e)}")
+        ws.close()
+
+@app.route('/grafana/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def proxy_grafana(path):
+    if "user" not in session:
+        logger.info("User session not found, redirecting to login")
+        return redirect(url_for("login"))
+
+    try:
+        headers = get_auth_headers()
+        url = f"{GRAFANA_URL}/{path}"
+        
+        method = request.method
+        data = request.get_data()
+        params = request.args
+
+        grafana_response = requests.request(
+            method,
+            url,
+            headers=headers,
+            data=data,
+            params=params,
+            allow_redirects=False
+        )
+
+        response = Response(grafana_response.content, status=grafana_response.status_code)
+        for key, value in grafana_response.headers.items():
+            if key.lower() != 'transfer-encoding':
+                response.headers[key] = value
+
+        logger.info(f"Proxying request to Grafana: {url} with status: {grafana_response.status_code}")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in proxy_grafana route: {str(e)}")
+        return InternalServerError("An unexpected error occurred during Grafana request")
+
 @app.route('/health')
 def health_check():
     try:
@@ -168,4 +288,7 @@ def health_check():
         return "Unhealthy", 500
 
 if __name__ == '__main__':
-    app.run(host=os.environ.get('SERVER_HOST', '0.0.0.0'), port=int(os.environ.get('SERVER_PORT', 5005)))
+    from gevent import pywsgi
+    from geventwebsocket.handler import WebSocketHandler
+    server = pywsgi.WSGIServer(('0.0.0.0', 5005), app, handler_class=WebSocketHandler)
+    server.serve_forever()
