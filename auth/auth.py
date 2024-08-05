@@ -166,6 +166,10 @@ def proxy_grafana_api(path):
         data = request.get_data()
         params = request.args
 
+        # Set Content-Type header for /api/frontend-metrics
+        if path == 'frontend-metrics':
+            headers['Content-Type'] = 'application/json'
+
         grafana_response = requests.request(
             method,
             url,
