@@ -3,10 +3,12 @@ import logging
 from flask import Flask, request, redirect, session, url_for, Response
 from msal import ConfidentialClientApplication
 import requests
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, urljoin
 from werkzeug.exceptions import InternalServerError
 from dotenv import load_dotenv
 from flask_sockets import Sockets
+import websocket
+import threading
 
 # Load environment variables from .env file
 load_dotenv()
@@ -42,7 +44,7 @@ msal_app = ConfidentialClientApplication(
 
 def get_auth_headers():
     return {
-        'X-WEBAUTH-USER': session["user"].get("username", ""),
+        'X-WEBAUTH-USER': session["user"].get("username", "").strip(),
         'X-WEBAUTH-NAME': session["user"].get("username", ""),
         'X-WEBAUTH-EMAIL': session["user"].get("email", "")
     }
@@ -93,17 +95,25 @@ def auth_response():
 def auth_grafana():
     if "user" not in session:
         logger.info("User session not found, redirecting to login")
-        return redirect(url_for("login"))
+        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
     
     try:
         headers = get_auth_headers()
-        logger.info(f"Headers being sent to Grafana: {headers}")
+        logger.debug(f"Headers being sent to Grafana: {headers}")
+
+        grafana_path = request.full_path.replace('/auth-grafana', '')
+        grafana_url = urljoin(GRAFANA_URL, grafana_path)
+        logger.debug(f"Attempting to connect to Grafana at: {grafana_url}")
 
         grafana_response = requests.get(
-            GRAFANA_URL + request.full_path.replace('/auth-grafana', ''),
+            grafana_url,
             headers=headers,
-            allow_redirects=False
+            allow_redirects=False,
+            timeout=10
         )
+
+        logger.debug(f"Grafana response status code: {grafana_response.status_code}")
+        logger.debug(f"Grafana response headers: {grafana_response.headers}")
 
         if grafana_response.is_redirect:
             redirect_url = grafana_response.headers.get('Location')
@@ -117,10 +127,9 @@ def auth_grafana():
             grafana_response = requests.get(
                 redirect_url,
                 headers=headers,
-                allow_redirects=False
+                allow_redirects=False,
+                timeout=10
             )
-
-        logger.info(f"Response headers from Grafana: {grafana_response.headers}")
 
         response = Response(grafana_response.content, status=grafana_response.status_code)
         for key, value in grafana_response.headers.items():
@@ -130,8 +139,11 @@ def auth_grafana():
         logger.info(f"Proxying request to Grafana with status: {grafana_response.status_code}")
 
         return response
+    except requests.RequestException as e:
+        logger.error(f"Error connecting to Grafana: {str(e)}")
+        return InternalServerError(f"Failed to connect to Grafana: {str(e)}")
     except Exception as e:
-        logger.error(f"Error in auth_grafana route: {str(e)}")
+        logger.error(f"Unexpected error in auth_grafana route: {str(e)}")
         return InternalServerError("An unexpected error occurred during Grafana authentication")
 
 @app.route('/public/<path:path>', methods=['GET'])
@@ -139,10 +151,11 @@ def proxy_static(path):
     try:
         grafana_response = requests.get(
             f"{GRAFANA_URL}/public/{path}",
-            allow_redirects=False
+            allow_redirects=False,
+            timeout=10
         )
 
-        logger.info(f"Response headers from Grafana: {grafana_response.headers}")
+        logger.debug(f"Response headers from Grafana: {grafana_response.headers}")
 
         response = Response(grafana_response.content, status=grafana_response.status_code)
         for key, value in grafana_response.headers.items():
@@ -159,17 +172,16 @@ def proxy_static(path):
 def proxy_grafana_api(path):
     if "user" not in session:
         logger.info("User session not found, redirecting to login")
-        return redirect(url_for("login"))
+        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
 
     try:
         headers = get_auth_headers()
-        url = f"{GRAFANA_URL}/api/{path}"
+        url = urljoin(GRAFANA_URL, f"/api/{path}")
         
         method = request.method
         data = request.get_data()
         params = request.args
 
-        # Set Content-Type header for /api/frontend-metrics
         if path == 'frontend-metrics':
             headers['Content-Type'] = 'application/json'
 
@@ -179,7 +191,8 @@ def proxy_grafana_api(path):
             headers=headers,
             data=data,
             params=params,
-            allow_redirects=False
+            allow_redirects=False,
+            timeout=10
         )
 
         response = Response(grafana_response.content, status=grafana_response.status_code)
@@ -236,11 +249,11 @@ def proxy_grafana_live(ws):
 def proxy_grafana(path):
     if "user" not in session:
         logger.info("User session not found, redirecting to login")
-        return redirect(url_for("login"))
+        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
 
     try:
         headers = get_auth_headers()
-        url = f"{GRAFANA_URL}/{path}"
+        url = urljoin(GRAFANA_URL, path)
         
         method = request.method
         data = request.get_data()
@@ -252,7 +265,8 @@ def proxy_grafana(path):
             headers=headers,
             data=data,
             params=params,
-            allow_redirects=False
+            allow_redirects=False,
+            timeout=10
         )
 
         response = Response(grafana_response.content, status=grafana_response.status_code)
@@ -270,7 +284,7 @@ def proxy_grafana(path):
 @app.route('/health')
 def health_check():
     try:
-        requests.get(GRAFANA_URL)
+        requests.get(GRAFANA_URL, timeout=5)
         return "Healthy", 200
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
@@ -279,5 +293,7 @@ def health_check():
 if __name__ == '__main__':
     from gevent import pywsgi
     from geventwebsocket.handler import WebSocketHandler
+    logger.info(f"Starting server. GRAFANA_URL is set to: {GRAFANA_URL}")
+    logger.info(f"External URL is set to: {EXTERNAL_URL}")
     server = pywsgi.WSGIServer(('0.0.0.0', 5005), app, handler_class=WebSocketHandler)
     server.serve_forever()
