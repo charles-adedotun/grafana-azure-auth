@@ -1,8 +1,6 @@
 services:
   grafana:
     image: grafana/grafana:latest
-    # ports:
-    #   - "3000:3000"
     environment:
       - GF_AUTH_PROXY_ENABLED=true
       - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
@@ -10,7 +8,7 @@ services:
       - GF_AUTH_PROXY_HEADERS=Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
       - GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false
-      - GF_SERVER_ROOT_URL=${ROOT_URL:-http://localhost:3200}
+      - GF_SERVER_ROOT_URL=${ROOT_URL:-https://localhost}
       - GF_SERVER_SERVE_FROM_SUB_PATH=false
       - GF_AUTH_PROXY_SYNC_TTL=60
       - GF_USERS_AUTO_ASSIGN_ORG=true
@@ -26,30 +24,27 @@ services:
   auth:
     build: ./auth
     depends_on:
-      - grafana    
-    # ports:
-    #   - "5005:5005"
+      - grafana
     environment:
-      - AZURE_TENANT=${AZURE_TENANT}
-      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
-      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
-      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
-      - AZURE_POLICY_NAME=${AZURE_POLICY_NAME}
+      - B2C_TENANT_NAME=${B2C_TENANT_NAME}
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - SIGNUPSIGNIN_USER_FLOW=${SIGNUPSIGNIN_USER_FLOW}
       - GRAFANA_URL=http://grafana:3000
-      - ROOT_URL=${ROOT_URL:-http://localhost:3200}
-      - SSL_VERIFY=False
+      - ROOT_URL=${ROOT_URL:-https://localhost}
     networks:
       - grafana
 
   nginx:
     build: ./nginx
     ports:
-      - "3200:3200"
+      - "80:80"
+      - "443:443"
     depends_on:
       - auth
       - grafana
     environment:
-      - ROOT_URL=${ROOT_URL:-http://localhost:3200}
+      - ROOT_URL=${SERVER_NAME:-localhost}
     networks:
       - grafana
 

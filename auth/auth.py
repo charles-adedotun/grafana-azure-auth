@@ -4,7 +4,6 @@ from flask import Flask, request, redirect, session, url_for, Response
 from msal import ConfidentialClientApplication
 import requests
 from urllib.parse import urlparse, urljoin
-from werkzeug.exceptions import InternalServerError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sockets import Sockets
 
@@ -29,7 +28,7 @@ REDIRECT_PATH = "/getAToken"
 
 # Grafana Configuration
 GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://grafana:3000')
-ROOT_URL = os.environ.get('ROOT_URL', 'http://localhost:3200')
+ROOT_URL = os.environ.get('ROOT_URL', 'https://localhost')
 
 # MSAL Configuration
 msal_app = ConfidentialClientApplication(

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Replace the ROOT_URL placeholder in the Nginx config
+# Replace environment variables in the Nginx config template
 envsubst '${ROOT_URL}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
 # Start Nginx
