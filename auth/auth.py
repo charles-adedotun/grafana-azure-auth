@@ -6,11 +6,7 @@ import requests
 from urllib.parse import urlparse, urljoin
 from werkzeug.exceptions import InternalServerError
 from werkzeug.middleware.proxy_fix import ProxyFix
-from dotenv import load_dotenv
 from flask_sockets import Sockets
-
-# Load environment variables from .env file
-load_dotenv()
 
 app = Flask(__name__)
 sockets = Sockets(app)

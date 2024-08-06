@@ -1,8 +1,8 @@
 services:
   grafana:
     image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
+    # ports:
+    #   - "3000:3000"
     environment:
       - GF_AUTH_PROXY_ENABLED=true
       - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
@@ -27,8 +27,8 @@ services:
     build: ./auth
     depends_on:
       - grafana    
-    ports:
-      - "5005:5005"
+    # ports:
+    #   - "5005:5005"
     environment:
       - AZURE_TENANT=${AZURE_TENANT}
       - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
