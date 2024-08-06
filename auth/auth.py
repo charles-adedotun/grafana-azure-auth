@@ -3,12 +3,11 @@ import logging
 from flask import Flask, request, redirect, session, url_for, Response
 from msal import ConfidentialClientApplication
 import requests
-from urllib.parse import urlparse, urlunparse, urljoin
+from urllib.parse import urlparse, urljoin
 from werkzeug.exceptions import InternalServerError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 from flask_sockets import Sockets
-import websocket
-import threading
 
 # Load environment variables from .env file
 load_dotenv()
@@ -16,6 +15,9 @@ load_dotenv()
 app = Flask(__name__)
 sockets = Sockets(app)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'supersecretkey')
+
+# Apply ProxyFix middleware
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +33,6 @@ REDIRECT_PATH = "/getAToken"
 
 # Grafana Configuration
 GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://grafana:3000')
-
-# New configuration for the external URL
 EXTERNAL_URL = os.environ.get('EXTERNAL_URL', 'http://localhost:3200')
 
 # MSAL Configuration
@@ -49,21 +49,32 @@ def get_auth_headers():
         'X-WEBAUTH-EMAIL': session["user"].get("email", "")
     }
 
+def external_url_for(endpoint, **values):
+    """Generate a full URL including the correct port"""
+    url = url_for(endpoint, _external=True, **values)
+    parsed = urlparse(url)
+    external_parsed = urlparse(EXTERNAL_URL)
+    return parsed._replace(netloc=f"{external_parsed.hostname}:{external_parsed.port}").geturl()
+
 @app.route("/")
 def index():
-    if "user" not in session:
-        logger.info("User not authenticated, redirecting to login")
-        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
-    logger.info("User authenticated, redirecting to Grafana")
-    return redirect(url_for("auth_grafana", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
+    if "user" in session:
+        logger.info(f"Authenticated user accessing root: {session['user']['username']}")
+        return Response("Authenticated. You can now access Grafana.", headers=get_auth_headers())
+    logger.info("Unauthenticated user accessing root, redirecting to login")
+    return redirect(url_for("login"))
 
 @app.route("/login")
 def login():
+    if "user" in session:
+        logger.info(f"Already authenticated user accessing login: {session['user']['username']}")
+        return redirect(EXTERNAL_URL)
+    
     session["flow"] = msal_app.initiate_auth_code_flow(
         scopes=[],
-        redirect_uri=url_for("auth_response", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme)
+        redirect_uri=external_url_for("auth_response")
     )
-    logger.info("Initiating auth code flow, redirecting to Azure B2C")
+    logger.info(f"Initiating auth code flow, redirecting to Azure B2C. Redirect URI: {external_url_for('auth_response')}")
     return redirect(session["flow"]["auth_uri"])
 
 @app.route(REDIRECT_PATH)
@@ -86,200 +97,20 @@ def auth_response():
         }
 
         logger.info(f"User logged in successfully with username: {session['user']['username']}")
-        return redirect(url_for("auth_grafana", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
+        return redirect(EXTERNAL_URL)
     except ValueError as ve:
         logger.error(f"Login failed: {str(ve)}")
         return f"Login failed: {str(ve)}"
 
-@app.route('/auth-grafana', methods=['GET'])
+@app.route('/auth-grafana')
 def auth_grafana():
     if "user" not in session:
-        logger.info("User session not found, redirecting to login")
-        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
+        logger.info("User session not found, returning 401")
+        return Response(status=401)
     
-    try:
-        headers = get_auth_headers()
-        logger.debug(f"Headers being sent to Grafana: {headers}")
-
-        grafana_path = request.full_path.replace('/auth-grafana', '')
-        grafana_url = urljoin(GRAFANA_URL, grafana_path)
-        logger.debug(f"Attempting to connect to Grafana at: {grafana_url}")
-
-        grafana_response = requests.get(
-            grafana_url,
-            headers=headers,
-            allow_redirects=False,
-            timeout=10
-        )
-
-        logger.debug(f"Grafana response status code: {grafana_response.status_code}")
-        logger.debug(f"Grafana response headers: {grafana_response.headers}")
-
-        if grafana_response.is_redirect:
-            redirect_url = grafana_response.headers.get('Location')
-            logger.info(f"Handling redirect to {redirect_url} and reapplying headers")
-
-            parsed_url = urlparse(redirect_url)
-            if parsed_url.hostname == 'localhost':
-                parsed_url = parsed_url._replace(netloc='grafana:3000')
-                redirect_url = urlunparse(parsed_url)
-
-            grafana_response = requests.get(
-                redirect_url,
-                headers=headers,
-                allow_redirects=False,
-                timeout=10
-            )
-
-        response = Response(grafana_response.content, status=grafana_response.status_code)
-        for key, value in grafana_response.headers.items():
-            if key.lower() != 'transfer-encoding':
-                response.headers[key] = value
-
-        logger.info(f"Proxying request to Grafana with status: {grafana_response.status_code}")
-
-        return response
-    except requests.RequestException as e:
-        logger.error(f"Error connecting to Grafana: {str(e)}")
-        return InternalServerError(f"Failed to connect to Grafana: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error in auth_grafana route: {str(e)}")
-        return InternalServerError("An unexpected error occurred during Grafana authentication")
-
-@app.route('/public/<path:path>', methods=['GET'])
-def proxy_static(path):
-    try:
-        grafana_response = requests.get(
-            f"{GRAFANA_URL}/public/{path}",
-            allow_redirects=False,
-            timeout=10
-        )
-
-        logger.debug(f"Response headers from Grafana: {grafana_response.headers}")
-
-        response = Response(grafana_response.content, status=grafana_response.status_code)
-        for key, value in grafana_response.headers.items():
-            response.headers[key] = value
-
-        logger.info(f"Proxying static file request for {path} with status: {grafana_response.status_code}")
-
-        return response
-    except Exception as e:
-        logger.error(f"Error proxying static file request: {str(e)}")
-        return InternalServerError("An unexpected error occurred while proxying static file request")
-
-@app.route('/grafana/api/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def proxy_grafana_api(path):
-    if "user" not in session:
-        logger.info("User session not found, redirecting to login")
-        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
-
-    try:
-        headers = get_auth_headers()
-        url = urljoin(GRAFANA_URL, f"/api/{path}")
-        
-        method = request.method
-        data = request.get_data()
-        params = request.args
-
-        if path == 'frontend-metrics':
-            headers['Content-Type'] = 'application/json'
-
-        grafana_response = requests.request(
-            method,
-            url,
-            headers=headers,
-            data=data,
-            params=params,
-            allow_redirects=False,
-            timeout=10
-        )
-
-        response = Response(grafana_response.content, status=grafana_response.status_code)
-        for key, value in grafana_response.headers.items():
-            if key.lower() != 'transfer-encoding':
-                response.headers[key] = value
-
-        logger.info(f"Proxying request to Grafana API: {url} with status: {grafana_response.status_code}")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error in proxy_grafana_api route: {str(e)}")
-        return InternalServerError("An unexpected error occurred during Grafana API request")
-
-@sockets.route('/grafana/api/live/ws')
-def proxy_grafana_live(ws):
-    if "user" not in session:
-        logger.info("User session not found for WebSocket connection")
-        return
-
-    try:
-        headers = get_auth_headers()
-        ws_url = f"{GRAFANA_URL.replace('http', 'ws')}/api/live/ws"
-
-        grafana_ws = websocket.create_connection(ws_url, header=headers)
-
-        def socket_proxy(source, destination):
-            try:
-                while True:
-                    message = source.receive()
-                    if message is None:
-                        break
-                    destination.send(message)
-            except Exception as e:
-                logger.error(f"Error in socket proxy: {str(e)}")
-            finally:
-                source.close()
-                destination.close()
-
-        t1 = threading.Thread(target=socket_proxy, args=(ws, grafana_ws))
-        t2 = threading.Thread(target=socket_proxy, args=(grafana_ws, ws))
-
-        t1.start()
-        t2.start()
-
-        t1.join()
-        t2.join()
-
-    except Exception as e:
-        logger.error(f"Error in proxy_grafana_live WebSocket: {str(e)}")
-        ws.close()
-
-@app.route('/grafana/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def proxy_grafana(path):
-    if "user" not in session:
-        logger.info("User session not found, redirecting to login")
-        return redirect(url_for("login", _external=True, _scheme=urlparse(EXTERNAL_URL).scheme))
-
-    try:
-        headers = get_auth_headers()
-        url = urljoin(GRAFANA_URL, path)
-        
-        method = request.method
-        data = request.get_data()
-        params = request.args
-
-        grafana_response = requests.request(
-            method,
-            url,
-            headers=headers,
-            data=data,
-            params=params,
-            allow_redirects=False,
-            timeout=10
-        )
-
-        response = Response(grafana_response.content, status=grafana_response.status_code)
-        for key, value in grafana_response.headers.items():
-            if key.lower() != 'transfer-encoding':
-                response.headers[key] = value
-
-        logger.info(f"Proxying request to Grafana: {url} with status: {grafana_response.status_code}")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error in proxy_grafana route: {str(e)}")
-        return InternalServerError("An unexpected error occurred during Grafana request")
+    headers = get_auth_headers()
+    logger.info(f"User authenticated, returning headers: {headers}")
+    return Response(headers=headers)
 
 @app.route('/health')
 def health_check():
