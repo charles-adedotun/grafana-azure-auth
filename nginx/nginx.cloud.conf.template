@@ -26,13 +26,13 @@ http {
 
     server {
         listen 80;
-        server_name ${ROOT_URL};
+        server_name ${SERVER_NAME};
         return 301 https://$server_name$request_uri;
     }
 
     server {
         listen 443 ssl;
-        server_name ${ROOT_URL};
+        server_name ${SERVER_NAME};
 
         ssl_certificate /etc/nginx/ssl/nginx.crt;
         ssl_certificate_key /etc/nginx/ssl/nginx.key;
@@ -59,7 +59,7 @@ http {
             proxy_set_header X-WEBAUTH-NAME $auth_name;
             proxy_set_header X-WEBAUTH-EMAIL $auth_email;
 
-            sub_filter 'http://grafana:3000' 'https://${ROOT_URL}';
+            sub_filter 'http://grafana:3000' '${ROOT_URL}';
             sub_filter_once off;
 
             error_page 401 = @error401;
