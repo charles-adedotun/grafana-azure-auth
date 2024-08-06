@@ -1,14 +1,13 @@
 FROM nginx:latest
 
-# Copy Nginx configuration and entrypoint script
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY entrypoint.sh /entrypoint.sh
+# Copy the template Nginx config file
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
 
-# Make entrypoint script executable
-RUN chmod +x /entrypoint.sh
+# Copy the start script
+COPY start-nginx.sh /start-nginx.sh
 
-# Set entrypoint script
-ENTRYPOINT ["/entrypoint.sh"]
+# Make the start script executable
+RUN chmod +x /start-nginx.sh
 
-# Expose HTTP port
-EXPOSE 80
+# Set the start script as the entry point
+CMD ["/start-nginx.sh"]

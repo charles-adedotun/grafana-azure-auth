@@ -26,7 +26,7 @@ http {
 
     server {
         listen 3200;
-        server_name localhost;
+        server_name ${ROOT_URL};
 
         location / {
             auth_request /auth-grafana;
@@ -36,17 +36,17 @@ http {
             auth_request_set $auth_email $upstream_http_x_webauth_email;
 
             proxy_pass http://grafana;
-            proxy_set_header Host $host:$server_port;
+            proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host:$server_port;
+            proxy_set_header X-Forwarded-Host $host;
 
             proxy_set_header X-WEBAUTH-USER $auth_user;
             proxy_set_header X-WEBAUTH-NAME $auth_name;
             proxy_set_header X-WEBAUTH-EMAIL $auth_email;
 
-            sub_filter 'http://grafana:3000' 'http://localhost:3200';
+            sub_filter 'http://grafana:3000' '${ROOT_URL}';
             sub_filter_once off;
 
             error_page 401 = @error401;
@@ -59,20 +59,20 @@ http {
 
         location = /login {
             proxy_pass http://flask_app/login;
-            proxy_set_header Host $host:$server_port;
+            proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host:$server_port;
+            proxy_set_header X-Forwarded-Host $host;
         }
 
         location = /getAToken {
             proxy_pass http://flask_app/getAToken;
-            proxy_set_header Host $host:$server_port;
+            proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host:$server_port;
+            proxy_set_header X-Forwarded-Host $host;
         }
 
         location = /health {

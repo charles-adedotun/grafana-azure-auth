@@ -33,7 +33,7 @@ REDIRECT_PATH = "/getAToken"
 
 # Grafana Configuration
 GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://grafana:3000')
-EXTERNAL_URL = os.environ.get('EXTERNAL_URL', 'http://localhost:3200')
+ROOT_URL = os.environ.get('ROOT_URL', 'http://localhost:3200')
 
 # MSAL Configuration
 msal_app = ConfidentialClientApplication(
@@ -50,11 +50,9 @@ def get_auth_headers():
     }
 
 def external_url_for(endpoint, **values):
-    """Generate a full URL including the correct port"""
-    url = url_for(endpoint, _external=True, **values)
-    parsed = urlparse(url)
-    external_parsed = urlparse(EXTERNAL_URL)
-    return parsed._replace(netloc=f"{external_parsed.hostname}:{external_parsed.port}").geturl()
+    """Generate a full URL using the ROOT_URL"""
+    path = url_for(endpoint, _external=False, **values)
+    return urljoin(ROOT_URL, path)
 
 @app.route("/")
 def index():
@@ -68,7 +66,7 @@ def index():
 def login():
     if "user" in session:
         logger.info(f"Already authenticated user accessing login: {session['user']['username']}")
-        return redirect(EXTERNAL_URL)
+        return redirect(ROOT_URL)
     
     session["flow"] = msal_app.initiate_auth_code_flow(
         scopes=[],
@@ -97,7 +95,7 @@ def auth_response():
         }
 
         logger.info(f"User logged in successfully with username: {session['user']['username']}")
-        return redirect(EXTERNAL_URL)
+        return redirect(ROOT_URL)
     except ValueError as ve:
         logger.error(f"Login failed: {str(ve)}")
         return f"Login failed: {str(ve)}"
@@ -125,6 +123,6 @@ if __name__ == '__main__':
     from gevent import pywsgi
     from geventwebsocket.handler import WebSocketHandler
     logger.info(f"Starting server. GRAFANA_URL is set to: {GRAFANA_URL}")
-    logger.info(f"External URL is set to: {EXTERNAL_URL}")
+    logger.info(f"Root URL is set to: {ROOT_URL}")
     server = pywsgi.WSGIServer(('0.0.0.0', 5005), app, handler_class=WebSocketHandler)
     server.serve_forever()

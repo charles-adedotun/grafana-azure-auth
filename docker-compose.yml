@@ -10,7 +10,7 @@ services:
       - GF_AUTH_PROXY_HEADERS=Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
       - GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false
-      - GF_SERVER_ROOT_URL=http://localhost:3200
+      - GF_SERVER_ROOT_URL=${ROOT_URL:-http://localhost:3200}
       - GF_SERVER_SERVE_FROM_SUB_PATH=false
       - GF_AUTH_PROXY_SYNC_TTL=60
       - GF_USERS_AUTO_ASSIGN_ORG=true
@@ -36,7 +36,7 @@ services:
       - AZURE_TENANT_ID=${AZURE_TENANT_ID}
       - AZURE_POLICY_NAME=${AZURE_POLICY_NAME}
       - GRAFANA_URL=http://grafana:3000
-      - EXTERNAL_URL=http://localhost:3200
+      - ROOT_URL=${ROOT_URL:-http://localhost:3200}
       - SSL_VERIFY=False
     networks:
       - grafana
@@ -48,6 +48,8 @@ services:
     depends_on:
       - auth
       - grafana
+    environment:
+      - ROOT_URL=${ROOT_URL:-http://localhost:3200}
     networks:
       - grafana
 
